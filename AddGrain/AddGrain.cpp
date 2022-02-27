@@ -42,7 +42,7 @@ template<typename pixel_t, typename noise_t> extern void updateFrame_avx512(cons
 template<typename T>
 static T getArg(const VSAPI* vsapi, const VSMap* map, const char* key, const T defaultValue) noexcept {
     T arg{};
-    auto err{ 0 };
+    int err{};
 
     if constexpr (std::is_same_v<T, bool>)
         arg = !!vsapi->mapGetInt(map, key, 0, &err);
@@ -107,11 +107,11 @@ static void generateNoise(const int planesNoise, const float scale, AddGrainData
     for (auto i{ 0 }; i < MAXP; i++)
         nRep[i] = d->constant ? 1.0f : 2.0f;
 
-    std::vector<float> lastLine(d->nStride[0]); // assume plane 0 is the widest one
+    std::vector<float> lastLine(d->nStride[0]);
     constexpr auto mean{ 0.0f };
     const float pvar[]{ d->var, d->uvar };
-    auto iset{ false };
-    auto gset{ 0.0f };
+    bool iset{};
+    float gset{};
     auto pns{ d->pNoiseSeeds.begin() };
 
     for (auto plane{ 0 }; plane < planesNoise; plane++) {
@@ -143,7 +143,7 @@ static void generateNoise(const int planesNoise, const float scale, AddGrainData
 
                 // set noise block
                 if constexpr (std::is_integral_v<noise_t>)
-                    *pNW++ = static_cast<noise_t>(std::round(r * scale));
+                    *pNW++ = static_cast<noise_t>(std::round(r) * scale);
                 else
                     *pNW++ = r * scale;
             }
@@ -212,7 +212,7 @@ static const VSFrame* VS_CC addgrainGetFrame(int n, int activationReason, void* 
     } else if (activationReason == arAllFramesReady) {
         auto src{ vsapi->getFrameFilter(n, d->node, frameCtx) };
         decltype(src) fr[]{ d->process[0] ? nullptr : src, d->process[1] ? nullptr : src, d->process[2] ? nullptr : src };
-        int pl[]{ 0, 1, 2 };
+        constexpr int pl[]{ 0, 1, 2 };
         auto dst{ vsapi->newVideoFrame2(&d->vi->format, d->vi->width, d->vi->height, fr, pl, src, core) };
 
         for (auto plane{ 0 }; plane < d->vi->format.numPlanes; plane++) {
@@ -321,12 +321,12 @@ static void VS_CC addgrainCreate(const VSMap* in, VSMap* out, [[maybe_unused]] v
 #endif
         }
 
-        auto scale{ 0.0f };
+        float scale;
         if (d->vi->format.sampleType == stInteger) {
+            scale = static_cast<float>(1 << (d->vi->format.bitsPerSample - 8));
             d->peak = (1 << d->vi->format.bitsPerSample) - 1;
-            scale = d->peak / 255.0f;
         } else {
-            scale = 1.0f / 255.0f;
+            scale = 1.0f / (d->vi->format.colorFamily == cfRGB ? 255.0f : 219.0f);
         }
 
         if (seed < 0)
@@ -334,7 +334,7 @@ static void VS_CC addgrainCreate(const VSMap* in, VSMap* out, [[maybe_unused]] v
         d->idum = seed;
 
         auto planesNoise{ 1 };
-        d->nStride[0] = (d->vi->width + 63) & ~63; // first plane
+        d->nStride[0] = (d->vi->width + 63) & ~63;
         d->nHeight[0] = d->vi->height;
         if (d->vi->format.colorFamily == cfGray) {
             d->uvar = 0.0f;
@@ -342,7 +342,7 @@ static void VS_CC addgrainCreate(const VSMap* in, VSMap* out, [[maybe_unused]] v
             d->uvar = d->var;
         } else {
             planesNoise = 2;
-            d->nStride[1] = ((d->vi->width >> d->vi->format.subSamplingW) + 63) & ~63; // second and third plane
+            d->nStride[1] = ((d->vi->width >> d->vi->format.subSamplingW) + 63) & ~63;
             d->nHeight[1] = d->vi->height >> d->vi->format.subSamplingH;
         }
 
@@ -378,7 +378,7 @@ static void VS_CC addgrainCreate(const VSMap* in, VSMap* out, [[maybe_unused]] v
 // Init
 
 VS_EXTERNAL_API(void) VapourSynthPluginInit2(VSPlugin* plugin, const VSPLUGINAPI* vspapi) {
-    vspapi->configPlugin("com.holywu.addgrain", "grain", "Random noise film grain generator", VS_MAKE_VERSION(9, 0), VAPOURSYNTH_API_VERSION, 0, plugin);
+    vspapi->configPlugin("com.holywu.addgrain", "grain", "Random noise film grain generator", VS_MAKE_VERSION(10, 0), VAPOURSYNTH_API_VERSION, 0, plugin);
     vspapi->registerFunction("Add",
                              "clip:vnode;"
                              "var:float:opt;"
